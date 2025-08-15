@@ -40,5 +40,5 @@
     <!-- 启动时常驻前台服务（比如蓝牙传输、文件同步等） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
-
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
 </manifest>

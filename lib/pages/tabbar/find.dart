@@ -8,9 +8,9 @@ class FindPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: SimpleWebView(
-        initialUrl: 'http://10.9.17.97:8890/#/about',
-        pageTitle: '关于我们',
-        showBackIcon: false,
+        initialUrl: 'http://10.9.17.62:3000/#/about',
+        // pageTitle: '关于我们',
+        // showBackIcon: false,
       ),
     );
   }
