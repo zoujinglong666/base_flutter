@@ -14,19 +14,20 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late TabController tabController;
-  late PageController pageController;
   String searchWord = '搜点什么···';
 
-  List<Widget> pageviews = [
-    NodePage(),
-    SimpleWebView(initialUrl: 'https://juejin.cn/'),
+  final List<Widget> pageviews = [
+    const NodePage(),
+    const SimpleWebView(initialUrl: 'https://juejin.cn/'),
   ];
 
   @override
   void initState() {
     super.initState();
     tabController = TabController(length: 2, vsync: this);
-    pageController = PageController(initialPage: 0);
+    tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -41,17 +42,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       body: Column(
         children: [
           _buildHeader(context),
-          _buildTap(context),
+          _buildTab(context),
           Expanded(
-            // 使用 Expanded 包裹 PageView
-            child: PageView(
-              controller: pageController,
-              physics: const NeverScrollableScrollPhysics(), // 禁用滑动手势
-              onPageChanged: (index) {
-                setState(() {
-                  tabController.animateTo(index);
-                });
-              },
+            child: IndexedStack(
+              index: tabController.index,
               children: pageviews,
             ),
           ),
@@ -79,9 +73,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 border: InputBorder.none,
                 prefixIcon: const Icon(Icons.search, color: Colors.grey),
                 hintText: searchWord,
-                hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
+                hintStyle:
+                const TextStyle(fontSize: 14, color: Colors.grey),
               ),
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
           ),
         ),
@@ -89,7 +84,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           onTap: () {
             Navigator.push(
               context,
-              CupertinoPageRoute(builder: (context) => AddNotePage()),
+              CupertinoPageRoute(builder: (context) => const AddNotePage()),
             );
           },
           child: Icon(
@@ -102,31 +97,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ),
   );
 
-  Widget _buildTap(BuildContext context) {
+  Widget _buildTab(BuildContext context) {
     return Container(
       width: MediaQuery.of(context).size.width,
       color: Theme.of(context).colorScheme.primaryContainer,
       child: TabBar(
-        tabs: [Tab(text: '笔记'), Tab(text: '精选')],
+        tabs: const [Tab(text: '笔记'), Tab(text: '精选')],
         controller: tabController,
         indicatorColor: Theme.of(context).colorScheme.onSurface,
         indicatorWeight: 2,
         labelColor: Theme.of(context).colorScheme.onSurface,
         unselectedLabelColor: Colors.grey,
-        // 去除下划线
         dividerColor: Colors.transparent,
-        // 禁用TabBar的滑动手势
         physics: const NeverScrollableScrollPhysics(),
-        onTap: (index) {
-          // 点击Tab直接切换页面
-          setState(() {
-            pageController.animateToPage(
-              index,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
-          });
-        },
       ),
     );
   }
