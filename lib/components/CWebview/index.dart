@@ -59,7 +59,7 @@ class _SimpleWebViewState extends State<SimpleWebView> {
   bool _canGoForward = false;
   double _displayProgress = 0.0; // 用于显示的动画进度
   Timer? _progressTimer;
-
+  bool _isFirstPage = false;
   void _startProgressAnimation() {
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(
@@ -84,6 +84,7 @@ class _SimpleWebViewState extends State<SimpleWebView> {
   void initState() {
     super.initState();
     _currentUrl = widget.initialUrl;
+    _isFirstPage = !Navigator.canPop(context); // 👈 关键
     _initSystemUI();
     _initializeWebView();
   }
@@ -94,6 +95,8 @@ class _SimpleWebViewState extends State<SimpleWebView> {
         statusBarColor: Colors.white,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
       ),
     );
   }
@@ -242,29 +245,64 @@ class _SimpleWebViewState extends State<SimpleWebView> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.white)
       ..setNavigationDelegate(NavigationDelegate(
-        // 原有 onPageStarted / onProgress / onPageFinished ...
         onPageStarted: (url) {
           setState(() {
             _isLoading = true;
             _hasError = false;
+            _errorMessage = '';
+            _progress = 0.0;
           });
+          widget.onUrlChanged?.call(url);
         },
-        onPageFinished: (url) {
+        onProgress: (progress) {
+          setState(() {
+            _progress = progress / 100;
+          });
+          _startProgressAnimation();
+        },
+        onPageFinished: (url) async {
           setState(() {
             _isLoading = false;
+            _hasError = false;
             _currentUrl = url;
           });
-          _getTitle();
-        },
-        onWebResourceError: (error) {
-          if (error.isForMainFrame ?? true) {
-            setState(() {
-              _hasError = true;
-              _errorMessage = _getErrorMessage(error);
-            });
+          
+          // 检查页面内容是否为空
+          try {
+            final content = await _controller.runJavaScriptReturningResult(
+              "document.body.innerText.trim()",
+            );
+            
+            if ((content as String).isEmpty) {
+              setState(() {
+                _hasError = true;
+                _errorMessage = '页面内容为空，请检查网络连接';
+              });
+            }
+          } catch (_) {
+            // JS 执行失败忽略
           }
+          
+          _getTitle();
+          _checkNavigationState();
+          widget.onUrlChanged?.call(url);
         },
-      ));
+        onWebResourceError: (WebResourceError error) {
+           final isMainFrame = error.isForMainFrame ?? true;
+           if (isMainFrame) {
+             setState(() {
+               _isLoading = false;
+               _hasError = true;
+               _errorMessage = _getErrorMessage(error);
+             });
+           }
+         },
+        onNavigationRequest: (request) => NavigationDecision.navigate,
+      ))
+      ..addJavaScriptChannel(
+        'FlutterBridge',
+        onMessageReceived: (message) => _handleJSMessage(message.message),
+      );
 
     // Android 文件选择
     if (_controller.platform is AndroidWebViewController) {
@@ -320,8 +358,64 @@ class _SimpleWebViewState extends State<SimpleWebView> {
         return '请求过于频繁，请稍后再试';
       case WebResourceErrorType.redirectLoop:
         return '页面重定向异常，请稍后重试';
+      case WebResourceErrorType.connect:
+        return '无法连接到服务器，请检查网络连接';
+      case WebResourceErrorType.io:
+        return '网络IO错误，请检查网络连接';
+      case WebResourceErrorType.fileNotFound:
+        return '请求的资源未找到';
+      case WebResourceErrorType.file:
+        return '文件访问错误';
+      case WebResourceErrorType.authentication:
+        return '身份验证失败';
+      case WebResourceErrorType.proxyAuthentication:
+        return '代理身份验证失败';
+      case WebResourceErrorType.unsupportedAuthScheme:
+        return '不支持的身份验证方案';
+      case WebResourceErrorType.unsupportedScheme:
+        return '不支持的URL协议';
+      case WebResourceErrorType.failedSslHandshake:
+        return 'SSL握手失败，请检查网络安全设置';
+      case WebResourceErrorType.tooManyRequests:
+        return '请求过于频繁，请稍后再试';
+      case WebResourceErrorType.unsafeResource:
+        return '不安全的资源，已被阻止';
       default:
-        return '加载失败，请检查网络连接';
+        return '页面加载失败，请检查网络连接';
+    }
+  }
+
+  // 新增：根据错误类型获取对应图标
+  IconData _getErrorIcon() {
+    if (_errorMessage.contains('网络') || _errorMessage.contains('连接')) {
+      return Icons.wifi_off_rounded;
+    } else if (_errorMessage.contains('超时')) {
+      return Icons.access_time_rounded;
+    } else if (_errorMessage.contains('服务器')) {
+      return Icons.dns_rounded;
+    } else if (_errorMessage.contains('网址') || _errorMessage.contains('链接')) {
+      return Icons.link_off_rounded;
+    } else if (_errorMessage.contains('安全') || _errorMessage.contains('SSL')) {
+      return Icons.security_rounded;
+    } else {
+      return Icons.error_outline_rounded;
+    }
+  }
+
+  // 新增：根据错误类型获取标题
+  String _getErrorTitle() {
+    if (_errorMessage.contains('网络') || _errorMessage.contains('连接')) {
+      return '网络连接失败';
+    } else if (_errorMessage.contains('超时')) {
+      return '连接超时';
+    } else if (_errorMessage.contains('服务器')) {
+      return '服务器无响应';
+    } else if (_errorMessage.contains('网址') || _errorMessage.contains('链接')) {
+      return '网址错误';
+    } else if (_errorMessage.contains('安全') || _errorMessage.contains('SSL')) {
+      return '安全连接失败';
+    } else {
+      return '页面加载失败';
     }
   }
 
@@ -532,8 +626,10 @@ class _SimpleWebViewState extends State<SimpleWebView> {
           statusBarColor: Colors.white,
           statusBarIconBrightness: Brightness.dark,
           statusBarBrightness: Brightness.light,
+          systemNavigationBarColor: Colors.white,
+          systemNavigationBarIconBrightness: Brightness.dark,
         ),
-        leading: showBackIcon ? _buildBackButton() : null,
+        leading: _isFirstPage ? null : _buildBackButton(),
         centerTitle: true,
         title: _buildTitle(),
         actions: _buildActions(showRefresh),
@@ -541,12 +637,12 @@ class _SimpleWebViewState extends State<SimpleWebView> {
     );
   }
 
-  Widget _buildBackButton() {
-    return IconButton(
-      icon: const Icon(Icons.arrow_back, color: Colors.black),
-      onPressed: _goBack,
-    );
-  }
+  // Widget _buildBackButton() {
+  //   return IconButton(
+  //     icon: const Icon(Icons.arrow_back, color: Colors.black),
+  //     onPressed: _goBack,
+  //   );
+  // }
 
   Widget _buildTitle() {
     return Text(
@@ -638,65 +734,182 @@ class _SimpleWebViewState extends State<SimpleWebView> {
         )
     );
   }
+  Widget _buildBackButton() {
+    return _isFirstPage
+        ? const SizedBox.shrink() // 不显示
+        : IconButton(
+      icon: const Icon(Icons.arrow_back, color: Colors.black),
+      onPressed: _goBack,
+    );
+  }
 
   Widget _buildLoadingIndicator() {
-    return Center(
-      child: widget.loadingWidget ??
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF4A90E2)),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '加载中...',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-              ),
-            ],
-          ),
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.white,
+      child: Center(
+        child: widget.loadingWidget ??
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 20,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1976D2)),
+                      strokeWidth: 3,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  '页面加载中...',
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '请稍候',
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+      ),
     );
   }
 
   Widget _buildErrorWidget() {
-    return Center(
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.white,
       child: widget.errorWidget ??
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.signal_wifi_off,
-                size: 64,
-                color: Colors.grey.shade400,
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // 自定义错误图标容器
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F2FD),
+                      borderRadius: BorderRadius.circular(60),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      _getErrorIcon(),
+                      size: 48,
+                      color: const Color(0xFF1976D2),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Text(
+                    _getErrorTitle(),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2C3E50),
+                      letterSpacing: -0.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage.isNotEmpty ? _errorMessage : '页面加载遇到问题，请稍后重试',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 15,
+                      height: 1.5,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+                  // 重试按钮
+                  Container(
+                    width: double.infinity,
+                    height: 48,
+                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                    child: ElevatedButton(
+                      onPressed: _retry,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1976D2),
+                        foregroundColor: Colors.white,
+                        elevation: 2,
+                        shadowColor: const Color(0xFF1976D2).withOpacity(0.3),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.refresh_rounded, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            '重新加载',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // 返回按钮
+                  if (!_isFirstPage)
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.grey.shade600,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: const Text(
+                        '返回上一页',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Text(
-                '网络连接失败',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.grey.shade700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _errorMessage,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey.shade600,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _retry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('重试'),
-                style: ElevatedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
+            ),
           ),
     );
   }

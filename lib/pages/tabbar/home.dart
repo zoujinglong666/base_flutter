@@ -45,7 +45,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Expanded(
             // 使用 Expanded 包裹 PageView
             child: PageView(
-              controller: pageController, // 绑定 TabController
+              controller: pageController,
+              physics: const NeverScrollableScrollPhysics(), // 禁用滑动手势
               onPageChanged: (index) {
                 setState(() {
                   tabController.animateTo(index);
@@ -114,9 +115,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         unselectedLabelColor: Colors.grey,
         // 去除下划线
         dividerColor: Colors.transparent,
+        // 禁用TabBar的滑动手势
+        physics: const NeverScrollableScrollPhysics(),
         onTap: (index) {
+          // 点击Tab直接切换页面
           setState(() {
-            pageController.jumpToPage(index);
+            pageController.animateToPage(
+              index,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
           });
         },
       ),
